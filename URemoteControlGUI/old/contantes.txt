@@ -1,0 +1,13 @@
+CONNECT_TO_SERVER_ROUT = "/connect/"
+DISCONNECT_FROM_SERVER_ROUT = "/disconnect/"
+GET_CONNECTED_CLIENT_STATE = "/get_connected_client_state/{public_token}/"
+GET_SESSION_INFO = "/get_session_info/{session_id}/"
+GET_NEW_USER_TOKEN = "/get_new_user_token/"
+DELETE_USE_TOKEN = "/delete_user_token/"
+
+CONTROLLER_CLIENT_TYPE = "1"
+CONTROLLED_CLIENT_TYPE = "2"
+
+MAX_CONNECTED_COUNT = 2
+
+ERROR = -1

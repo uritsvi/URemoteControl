@@ -1,0 +1,192 @@
+using murrayju.ProcessExtensions;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Runtime.InteropServices;
+using System.Runtime.Remoting.Messaging;
+using System.Security.Policy;
+using System.Text;
+using System.Threading;
+using System.Timers;
+using URemoteControlGUI;
+using static System.Collections.Specialized.BitVector32;
+
+namespace Shared
+{
+
+
+    public class Common
+    {
+        public const string InIFileName = "config.ini";
+        
+        public static string InIFullPath = 
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, InIFileName);
+        public static string HTTPServerAddress = 
+            ReadFromInI(
+             HTTPServerUrlInIKey,
+             ServerConnectInISection);
+
+        public const string HTTPServerUrlInIKey = "http_server_url";
+        public const string MainServerAddressInIKey = "main_server_address";
+        public const string MainServerPortInIKey = "main_server_port";
+        public const string PublicTokenInIKey = "public_token";
+        public const string PrivateTokenInIKey = "private_token";
+        public const string AuthorizationHeaderName = "Authorization";
+
+        public const int ControledClientType = 2;
+        public const int ControlerClientType = 1;
+
+        public const string ConnectToServerRout = "connect/";
+        public const string DisconnectFromServerRout = "disconnect/";
+        public const string GetConnectedClienteState = "get_connected_client_state/{0}";
+        public const string GetSessionInfo = "get_session_info/{0}/";
+        public const string GetNewUserTokesRout = "get_new_user_token/";
+        public const string DeleteUserTokenRout = "delete_user_token/";
+
+        public const string PublicTokenDictKey = "public_token";
+        public const string PrivateTokenDictKey = "private_token";
+        public const string ClientTypeDictKey = "client_type";
+        public const string SessionPortDictKey = "port";
+
+        public const string ServerConnectInISection = "ServerConnectInfo";
+        public const string TokensInISection = "Tokens";
+
+        public const int TokenSize = 10;
+
+        public const int Error = -1;
+        public const int HTTPErrorNotFound = 404;
+
+        
+        [DllImport("kernel32", CharSet = CharSet.Unicode)]
+        private static extern int GetPrivateProfileString(string Section, string Key, string Default, StringBuilder RetVal, int Size, string FilePath);
+
+        [DllImport("kernel32", CharSet = CharSet.Unicode)]
+
+        static extern long WritePrivateProfileString(string Section, string Key, string Value, string FilePath);
+
+
+        public static IntPtr StartProcess(
+            int port,
+            int appType,
+            bool StartFromService)
+        {
+
+
+            string appPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CosnoleAppLancher.exe");
+
+            string mainServerAddress = ReadFromInI(
+                MainServerAddressInIKey,
+                ServerConnectInISection);
+
+            string programArgs =
+                appType.ToString() + " " +
+                mainServerAddress + " " +
+                port.ToString();
+
+
+            IntPtr outProcess;
+            if (StartFromService)
+            {
+                programArgs = appPath + " " + programArgs;
+                outProcess = ProcessExtensions.StartProcessAsCurrentUser(appPath, programArgs);
+
+            }
+            else
+            {
+                outProcess = Process.Start(appPath, programArgs).Handle;
+            }
+
+            return outProcess;
+        }
+
+
+
+        public static string ReadFromInI(
+            string Key,
+            string section)
+        {
+
+            var RetVal = new StringBuilder(256);
+            GetPrivateProfileString(
+                section,
+                Key,
+                "",
+                RetVal,
+                256,
+                InIFullPath);
+
+            return RetVal.ToString();
+        }
+
+        public static long WriteToInI(
+            string key,
+            string value,
+            string section)
+        {
+
+            return WritePrivateProfileString(
+                section, 
+                key, 
+                value,
+                InIFullPath);
+        }
+
+        public static void DeleteUserToken()
+        {
+
+
+        }
+
+        public static void RequestNewUserTokens(
+            out string publicToken, 
+            out string privateToken)
+        {
+            try
+            {
+                WebResponse respons;
+                var httpWebRequest = (HttpWebRequest)WebRequest.Create(
+                    HTTPServerAddress + GetNewUserTokesRout
+                    );
+
+                httpWebRequest.ContentType = "application/json";
+                httpWebRequest.Method = "GET";
+
+                respons = httpWebRequest.GetResponse();
+
+                using (var streamReader = new StreamReader(respons.GetResponseStream()))
+                {
+
+                    var tokens = JsonConvert.DeserializeObject
+                        <Dictionary<string, string>>(streamReader.ReadToEnd());
+
+                    publicToken = tokens[PublicTokenDictKey];
+                    privateToken = tokens[PrivateTokenDictKey];
+
+
+                }
+            }
+            catch(WebException ex)
+            {
+                Utils.ExitWithError("Failed to send http request, error " + ex.Message);
+                   
+                publicToken = null;
+                privateToken = null;
+            }
+
+
+        }
+
+        public static string HashUserTokens(
+            string publicToken, 
+            string privateToken)
+        {
+            string toHash = publicToken + privateToken;
+            return toHash.GetHashCode().ToString();
+        }
+    }
+}

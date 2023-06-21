@@ -1,0 +1,80 @@
+import threading
+from subprocess import Popen, CREATE_NEW_CONSOLE
+import os
+
+import Constants
+import User
+import Utils
+
+
+def run_server(port: int):
+    path = os.path.join("GoServer", "go_build_Server.exe")
+
+    Utils.log(path)
+
+    command = [path, str(port)]
+
+    Popen(command, creationflags=CREATE_NEW_CONSOLE).wait()
+
+
+class Session:
+    # noinspection PyTypeChecker
+    def __init__(self, port: int):
+        self.__controlled: User.User = None
+        self.__controller: User.User = None
+        self.__port: int = port
+
+    def set_controller(self, controller: User.User):
+        self.__controller = controller
+
+    def set_controlled(self, controlled: User.User):
+        self.__controlled = controlled
+
+    def run(self):
+        threading.Thread(target=run_server, args=[self.__port]).start()
+
+    def get_port(self) -> int:
+        return self.__port
+
+    def build_dict(self) -> {str:str}:
+        out = {"port": str(self.__port)}
+        return out
+
+
+class Sessions:
+    __instance = None
+
+    @classmethod
+    def get_instance(cls):
+        if cls.__instance is None:
+            cls.__instance = Sessions()
+
+        return cls.__instance
+
+    def __init__(self):
+        self.__new_port_index: int = 10000
+        self.__sessions = {int: Session}
+
+    def create_new_session(self, session_id: int) -> Session:
+        port: int = self.__new_port_index
+        self.__new_port_index += 1
+
+        if port >= 65535:
+            Utils.log("max out ports")
+            return Constants.ERROR
+
+        session = Session(port)
+
+        # noinspection PyTypeChecker
+        self.__sessions[session_id] = session
+
+        return session
+
+    def get_session_by_id(self, session_id: int) -> Session:
+
+        # noinspection PyTypeChecker
+        return self.__sessions.get(session_id)
+
+    def get_session_info(self, session_id: str):
+        # noinspection PyTypeChecker
+        return self.__sessions[session_id]

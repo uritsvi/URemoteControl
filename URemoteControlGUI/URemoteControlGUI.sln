@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.4.33213.308
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "URemoteControlGUI", "URemoteControlGUI.csproj", "{DD25AAFD-6CA5-468B-A94E-DAE2CD596480}"
+EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Common", "..\Common\c#\Common\Common.shproj", "{26FFF285-256D-4990-9917-2E6721AFA609}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{DD25AAFD-6CA5-468B-A94E-DAE2CD596480}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DD25AAFD-6CA5-468B-A94E-DAE2CD596480}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DD25AAFD-6CA5-468B-A94E-DAE2CD596480}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DD25AAFD-6CA5-468B-A94E-DAE2CD596480}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8920BE01-F768-478D-A932-6F566A527D66}
+	EndGlobalSection
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		..\Common\c#\Common\Common.projitems*{26fff285-256d-4990-9917-2e6721afa609}*SharedItemsImports = 13
+		..\Common\c#\Common\Common.projitems*{dd25aafd-6ca5-468b-a94e-dae2cd596480}*SharedItemsImports = 4
+	EndGlobalSection
+EndGlobal

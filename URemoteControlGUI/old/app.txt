@@ -1,0 +1,93 @@
+import http.client
+import random
+import threading
+import hashlib
+
+import ClientInfo
+import Utils
+
+connected_state_lock = threading.Lock()
+tokens_lock = threading.Lock()
+
+users = {str: User.User}
+public_token_to_hash_key = {str: str}
+
+
+def get_random_token() -> str:
+    return str(random.randint(1000000000, 9999999999))
+
+
+def get_new_public_token() -> str:
+
+    tokens_lock.acquire()
+
+    out = get_random_token()
+    while users.get(out) is not None:
+        out = get_random_token()
+
+    tokens_lock.release()
+
+    return out
+
+
+def try_connect_client(client_info: ClientInfo.ClientInfo) -> [int, User.User]:
+    global connected_state_lock
+
+    connected_state_lock.acquire()
+
+    user_tokens = client_info.build_tokens_object()
+    user = users.get(user_tokens.hash())
+    if user is None:
+        Utils.log("User does not exist")
+        connected_state_lock.release()
+        return http.HTTPStatus.NOT_FOUND, None
+
+    user.connected = True
+
+    connected_state_lock.release()
+
+    return http.HTTPStatus.CONTINUE, user
+
+
+def disconnect_client(client_info: ClientInfo.ClientInfo) -> int:
+    global connected_state_lock
+    global users
+
+    connected_state_lock.acquire()
+
+    user_tokens = client_info.build_tokens_object()
+    user = users.get(user_tokens.hash())
+    if user is None:
+        Utils.log("User does not exist")
+        connected_state_lock.release()
+        return http.HTTPStatus.NOT_FOUND
+
+    if not user.connected:
+        Utils.log("User is not connected")
+        connected_state_lock.release()
+        return http.HTTPStatus.INTERNAL_SERVER_ERROR
+
+    user.connected = False
+
+    connected_state_lock.release()
+
+    return http.HTTPStatus.CONTINUE
+
+
+def get_connected_state(public_token: str) -> {bool}:
+    global connected_state_lock
+    global public_token_to_hash_key
+
+    connected_state_lock.acquire()
+
+    tokens_hash = public_token_to_hash_key.get(public_token)
+    if tokens_hash is None:
+        Utils.log("user does not exist: " + public_token)
+        connected_state_lock.release()
+        return False
+
+    connected = users[tokens_hash].connected
+
+    connected_state_lock.release()
+
+    return connected

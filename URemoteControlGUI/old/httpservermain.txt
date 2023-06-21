@@ -1,0 +1,94 @@
+import http.client
+
+import uvicorn
+import fastapi
+
+from fastapi.responses import JSONResponse
+
+import App
+import ClientInfo
+import Constants
+import Utils
+import UserToken
+import Sessions
+
+app = fastapi.FastAPI()
+
+"""
+@app.post("/connect/")
+async def connect(client_info: ClientInfo.ClientInfo):
+
+    Utils.log("connect " + str(client_info))
+
+    result, user = App.try_connect_client(client_info)
+
+    if result is not http.HTTPStatus.CONTINUE or \
+            client_info.client_type is not Constants.CONTROLLED_CLIENT_TYPE:
+        return result
+
+    session = Sessions.Sessions.get_instance().\
+        create_new_session(client_info.public_token)
+
+    Utils.log("new session created on port " + str(session.get_port()))
+
+    session.set_controlled(user)
+    session.run()
+
+    return session.get_port()
+"""
+
+
+@app.post(Constants.CONNECT_TO_SERVER_ROUT)
+async def connect(request: fastapi.Request):
+    user_token = request.headers.get("Authorization")
+
+    Utils.log("User " + user_token + " connected")
+
+    return http.HTTPStatus.CONTINUE
+
+
+@app.post(Constants.DISCONNECT_FROM_SERVER_ROUT)
+async def disconnect(request: fastapi.Request):
+    user_token = request.headers.get("Authorization")
+
+    Utils.log("User " + user_token + " disconnected")
+
+    return http.HTTPStatus.CONTINUE
+
+
+@app.get(Constants.GET_CONNECTED_CLIENT_STATE)
+async def get_connected_client_state(public_token: str):
+    Utils.log("get connected client state, token: " + str(public_token))
+
+    return JSONResponse(App.get_connected_state(public_token))
+
+
+@app.get(Constants.GET_SESSION_INFO)
+async def get_session_info(session_id: str):
+    Utils.log("Get Session info " + session_id)
+
+    return JSONResponse(Sessions.Sessions.get_instance().get_session_by_id(session_id).build_dict())
+
+
+@app.get(Constants.GET_NEW_USER_TOKEN)
+async def get_new_user_token():
+    user_token = App.get_new_user_token().build_dict()
+
+    Utils.log("get new user token")
+
+    return JSONResponse(user_token)
+
+
+@app.delete(Constants.DELETE_USE_TOKEN)
+async def delete_user_token(token: UserToken.FastApiUserToken):
+    Utils.log("delete user token")
+
+    App.delete_user_token(token.build_user_token_object())
+
+
+def serve():
+    uvicorn.run(app, host="0.0.0.0", port=8080)
+
+
+if __name__ == "__main__":
+    serve()

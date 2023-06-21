@@ -1,0 +1,205 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.ServiceProcess;
+using murrayju.ProcessExtensions;
+using Newtonsoft.Json;
+using System.Threading;
+using Shared;
+using System.Runtime.InteropServices;
+
+namespace WindowsService1
+{
+    public partial class URemoteControlService : ServiceBase
+    {
+        [DllImport("kernel32", CharSet = CharSet.Unicode)]
+        private static extern bool GetExitCodeProcess(IntPtr Result, out int ExitCode);
+
+        private const int STILL_ACTIVE = 0x00000103;
+
+        private bool _Connected = false;
+
+        private Dictionary<string, string> _UserInfo = new Dictionary<string, string>()
+        {
+             {Common.ClientTypeDictKey, Shared.Common.ControledClientType.ToString() },
+             {Common.PublicTokenDictKey, ""},
+             {Common.PrivateTokenDictKey, ""}
+        };
+
+        public URemoteControlService()
+        {
+
+
+            InitializeComponent();
+            eventLog1 = new EventLog();
+
+            eventLog1.Source = "URemoteControlWindowsService";
+            eventLog1.Log = "URemoteControlWindowsServiceLog";
+
+#if DEBUG
+            string publicToken;
+            string privateToken;
+
+            Common.RequestNewUserTokens(
+                out publicToken,
+                out privateToken);
+
+            Common.WriteToInI(
+            Common.PublicTokenInIKey,
+            publicToken,
+            Common.TokensInISection);
+
+            Common.WriteToInI(
+                 Common.PrivateTokenInIKey,
+                 privateToken,
+                 Common.TokensInISection);
+#endif
+
+            Utils.InitUtils(
+                eventLog1);
+
+            _UserInfo[Common.PublicTokenDictKey] =
+                Common.ReadFromInI(
+                Common.PublicTokenInIKey,
+                Common.TokensInISection);
+
+            _UserInfo[Common.PrivateTokenDictKey] =
+                Common.ReadFromInI(
+                Common.PrivateTokenInIKey,
+                Common.TokensInISection);
+        }
+
+
+
+        private void DisconnectFromServer()
+        {
+            string HttpServerUrl = Shared.Common.ReadFromInI(
+                Common.HTTPServerUrlInIKey,
+                Common.ServerConnectInISection) + Common.DisconnectFromServerRout;
+
+            try
+            {
+               int respons = Common.SendServerPostRequest<int>(
+                       HttpServerUrl,
+                       _UserInfo);
+
+                if (respons == Common.Error)
+                {
+                    Utils.ExitWithError("Failed to disconnect to server");
+                }
+            }catch {}
+
+            _Connected = false;
+
+
+
+        }
+
+        private void ConnectToServerAndStartProcess()
+        {
+
+            string HttpServerUrl = Shared.Common.ReadFromInI(
+                Common.HTTPServerUrlInIKey,
+                Common.ServerConnectInISection) + Common.ConnectToServerRout;
+
+  
+
+            try
+            {
+                int port = Common.SendServerPostRequest<int>(
+                    HttpServerUrl,
+                    _UserInfo);
+
+                if(port == Common.Error)
+                {
+                    Utils.ExitWithError("Failed to create a session");
+                    return;
+                }
+
+                _Connected = true;
+
+                IntPtr processHandle =
+                    Shared.Common.StartProcess(
+                        port,
+                        Shared.Common.ControledClientType,
+                        true);
+
+                WaitProcessExit(
+                    processHandle, 
+                    Utils.Exit);
+
+
+            }
+            catch
+            {
+                Utils.ExitWithError("Unknown error have occured");
+            }
+        }
+
+        private static void CheckIfProcessIsActive(
+            IntPtr processHandle,
+            System.Timers.Timer timer,
+            Action callback)
+        {
+
+
+            int exitCode;
+            bool res = GetExitCodeProcess(processHandle, out exitCode);
+
+            if (exitCode == STILL_ACTIVE || !res)
+            {
+                return;
+            }
+
+
+            timer.Enabled = false;
+            callback();
+        }
+
+        public static void WaitProcessExit(
+            IntPtr processHandle,
+            Action callback)
+        {
+            Process[] processes;
+            do
+            {
+                Thread.Sleep(500);
+                processes = Process.GetProcessesByName("ControledApp");
+
+            } while (processes.Length == 0);
+
+            System.Timers.Timer timer = new System.Timers.Timer();
+
+            timer.Elapsed += ((sender, e) =>
+            {
+                CheckIfProcessIsActive(
+                processes[0].Handle,
+                timer,
+                callback);
+            });
+
+            timer.Interval = 1000;
+
+            timer.Enabled = true;
+        }
+
+        protected override void OnStart(string[] args)
+        {
+
+           new Thread(() => { ConnectToServerAndStartProcess(); }).Start();
+            
+        }
+
+        protected override void OnStop()
+        {
+            if(_Connected) 
+            {
+                DisconnectFromServer();
+            }
+
+        }
+
+    }
+}

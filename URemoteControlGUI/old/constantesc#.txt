@@ -1,0 +1,7 @@
+        public const string ConnectToServerRout = "connect/";
+        public const string DisconnectFromServerRout = "disconnect/";
+        public const string GetConnectedClienteState = "get_connected_client_state/{0}";
+        public const string GetSessionInfo = "get_session_info/{0}/";
+        public const string GetNewUserTokesRout = "get_new_user_token/";
+        public const string DeleteUserTokenRout = "delete_user_token/";
+        public const string ServerConnectInISection = "ServerConnectInfo";
