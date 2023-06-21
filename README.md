@@ -13,7 +13,7 @@ Free and open source remote control software
 - Open Visual Studio 2022 Developer Command Prompt
 - Run ```vcpkg install zlib:x64-windows``` 
 - ```cd``` into the build folder in the project root directory. 
-- ```namke build.make```
+- ```nmake build.make```
 
 <h2>Install from source and run</h2>
 
