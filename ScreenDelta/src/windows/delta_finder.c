@@ -411,6 +411,7 @@ void _handle_capture(
 		platform_exit_with_error("Failed to capture screen\n");
 #else
 		_post_full_screen_capture_msg();
+		return;
 #endif
 		
 	}
