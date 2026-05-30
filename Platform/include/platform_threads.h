@@ -1,5 +1,5 @@
-#ifndef __THREADS__
-#define __THREADS__
+#ifndef __PLATFORM_THREADS__
+#define __PLATFORM_THREADS__
 
 
 #include <stdbool.h>

@@ -1,7 +1,7 @@
 #include <Common.h>
 #include <connect_to_server.h>
 #include <network.h>
-#include <threads.h>
+#include <platform_threads.h>
 #include <program_config.h>
 #include <error.h>
 
@@ -34,7 +34,7 @@ void receive_io(InputStruct* buffer) {
 	int size;
 
 	bool res =
-		receive_data(
+		receive_encrypted_data(
 			g_Socket,
 			buffer,
 			&size);

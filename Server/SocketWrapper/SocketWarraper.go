@@ -2,6 +2,8 @@ package SocketWrapper
 
 import (
 	"encoding/binary"
+	"errors"
+	"io"
 	"net"
 	"time"
 )
@@ -55,7 +57,9 @@ func (socket SocketWrapper) SendFullBuffer(buffer *[]byte) {
 
 func (socket SocketWrapper) ReadOneByte() byte {
 	buffer := make([]byte, 1)
-	_, _error := socket.socket.Read(buffer)
+	// io.ReadFull guarantees the whole buffer is read; a bare Read can return
+	// fewer bytes than requested when TCP splits the data across segments.
+	_, _error := io.ReadFull(socket.socket, buffer)
 
 	if _error != nil {
 		panic("Failed to receive data from client, error msg" + _error.Error())
@@ -66,7 +70,9 @@ func (socket SocketWrapper) ReadOneByte() byte {
 
 func (socket SocketWrapper) ReadUin32() (out uint32) {
 	buffer := make([]byte, 4)
-	_, _error := socket.socket.Read(buffer)
+	// io.ReadFull is essential here: a length prefix split across TCP segments
+	// would otherwise be parsed from a partial buffer, desyncing the stream.
+	_, _error := io.ReadFull(socket.socket, buffer)
 
 	if _error != nil {
 		panic("Failed to receive data from client, error msg" + _error.Error())
@@ -75,6 +81,18 @@ func (socket SocketWrapper) ReadUin32() (out uint32) {
 	out = binary.LittleEndian.Uint32(buffer)
 
 	return out
+}
+
+func (socket SocketWrapper) ReadNBytes(n uint32) []byte {
+	buffer := make([]byte, n)
+	// io.ReadFull guarantees the whole blob is read even if TCP splits it.
+	_, _error := io.ReadFull(socket.socket, buffer)
+
+	if _error != nil {
+		panic("Failed to receive data from client, error msg" + _error.Error())
+	}
+
+	return buffer
 }
 
 func (socket SocketWrapper) ReadBuffer(buffer *[]byte) uint32 {
@@ -89,16 +107,21 @@ func (socket SocketWrapper) ReadBuffer(buffer *[]byte) uint32 {
 }
 
 func (socket SocketWrapper) IsConnected() bool {
-	_error := socket.socket.SetReadDeadline(time.Now().Add(time.Second))
-	if _error != nil {
-		panic("Failed to set conn read data time")
+	err := socket.socket.SetReadDeadline(time.Now().Add(time.Second))
+	if err != nil {
+		return false
 	}
 
 	buffer := make([]byte, 1)
-	_, _error = socket.socket.Read(buffer)
-	if _error == nil || _error.(net.Error).Timeout() {
+	_, err = socket.socket.Read(buffer)
+	if err == nil {
 		return true
-
 	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
 	return false
 }

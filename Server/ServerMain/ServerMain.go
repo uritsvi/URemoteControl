@@ -36,6 +36,11 @@ func onAllConnected() {
 
 	ControlChannel.SendMessageToAll(ControlChannel.AllClientsConnectedMsg)
 
+	// Deliver each client its peer's end-to-end public key over the control
+	// channel, right after the all-connected signal and before the tunnels
+	// start, so the session key is established before any data flows.
+	ControlChannel.SendPublicKeys()
+
 	allTunnels := ClientsConnected.ConstructAllTunnels()
 	for tunnelElement := allTunnels.Tunnels.Front(); tunnelElement != nil; tunnelElement = tunnelElement.Next() {
 		tunnelElement.Value.(*Tunnel.Tunnel).RunTunnel()

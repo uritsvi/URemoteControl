@@ -1,12 +1,18 @@
 #include <window.h>
 #include <program_config.h>
-#include <threads.h>
+#include <platform_threads.h>
 #include <input.h>
 #include <double_buffers.h>
 #include <delta_struct.h>
 #include <error.h>
 #include <control_channel.h>
 #include <platfrom_memory_utils.h>
+#include <crypto.h>
+
+#include <zlib.h>
+#include <stdio.h>
+#include <stdarg.h>
+#include <share.h>
 
 #include "send_io.h"
 #include "receive_screen_buffer.h"
@@ -39,11 +45,34 @@ void _reset_mouse_pos() {
 		window_rect.top + (window_height / 2));
 }
 
+static FILE* g_DbgLog = NULL;
+static void _dbg(const char* fmt, ...) {
+	if (g_DbgLog == NULL) {
+		return;
+	}
+	va_list a;
+	va_start(a, fmt);
+	vfprintf(g_DbgLog, fmt, a);
+	va_end(a);
+	fflush(g_DbgLog);
+}
+
 void _handle_screen_buffer() {
 	ProgramConfig* config = get_program_config();
 
+	g_DbgLog = _fsopen("controller_dbg.log", "w", _SH_DENYWR);
+
+	int raw_frame_size =
+		config->target_width * config->target_height * (config->target_bit_count / 8);
+
+	/*
+	 * The received payload is [DeltaPacketInfo][zlib data]; the zlib data can be
+	 * slightly larger than the raw frame for incompressible screens, so size the
+	 * receive buffer with compressBound to match the sender and avoid an
+	 * overflow.
+	 */
 	int full_buffer_size =
-		sizeof(DeltaPacketInfo) + config->target_width * config->target_height * (config->target_bit_count / 8);
+		sizeof(DeltaPacketInfo) + compressBound(raw_frame_size);
 
 	Event work_done;
 	bool res = create_event(&work_done);
@@ -67,21 +96,32 @@ void _handle_screen_buffer() {
 			buffers->front,
 			work_done);
 
-		DeltaPacket* current_delta = 
+		DeltaPacket* current_delta =
 			buffers->back;
+
+		Rect _r = current_delta->info.rect;
+		int _w = _r.right - _r.left;
+		int _h = _r.bottom - _r.top;
+		_dbg("frame comp=%d rect=(%d,%d,%d,%d) w=%d h=%d draw_bytes=%d uncbuf=%d\n",
+			current_delta->info.compressed_size, _r.left, _r.top, _r.right, _r.bottom,
+			_w, _h, _w * _h * (config->target_bit_count / 8), g_UncompressedSize);
 
 		int dest_len = g_UncompressedSize;
 		res = uncompress(
-			g_Uncompressed, 
-			&dest_len, 
+			g_Uncompressed,
+			&dest_len,
 			buffers->back + sizeof(DeltaPacketInfo),
 			current_delta->info.compressed_size);
+
+		_dbg("  uncompress res=%d dest_len=%d\n", res, dest_len);
 
 		draw_to_window(
 			g_AppWindow,
 			config->target_bit_count,
 			g_Uncompressed,
 			current_delta->info.rect);
+
+		_dbg("  drawn\n");
 
 		wait_event(work_done);
 		reset_event(work_done);
@@ -101,16 +141,34 @@ void _control_key_callback(char key) {
 }
 
 void _on_all_clients_connected() {
-	_reset_mouse_pos();
+	ProgramConfig* config = get_program_config();
+
+	/*
+	 * By the time this fires the control channel has already completed the
+	 * end-to-end key exchange (peer public key delivered by the relay), so the
+	 * session key is ready before any screen/input data flows.
+	 */
+	if (!config->debug_mode) {
+		_reset_mouse_pos();
+	}
 
 	Thread thread;
 	bool res = create_thread(
-		_handle_screen_buffer, 
-		NULL, 
+		_handle_screen_buffer,
+		NULL,
 		&thread);
 
 	if (!res) {
 		platform_exit_with_error("Failed to create thread to handle the screen buffer\n");
+		return;
+	}
+
+	if (config->debug_mode) {
+		/*
+		 * Debug mode: do not bind the monitor-switch control keys and do not
+		 * register the input-forwarding callback, so the local mouse and
+		 * keyboard stay usable. The remote screen is still displayed.
+		 */
 		return;
 	}
 
@@ -134,6 +192,10 @@ void shut_down() {
 
 void run_app() {
 	init_error(shut_down);
+
+	/* Prove end-to-end encryption is active: status, key id and self-test go to
+	 * the console and to bin\client_e2e_<pid>.log once the handshake completes. */
+	crypto_log_enable();
 
 	ProgramConfig* config = get_program_config();
 
@@ -179,12 +241,19 @@ void run_app() {
 		table);
 
 	
+	set_window_start_windowed(config->debug_mode);
 	show_window(g_AppWindow);
 
 
 	init_receive_screen_buffer();
-	
-	init_input(g_AppWindow);
+
+	if (!config->debug_mode) {
+		/*
+		 * Debug mode keeps the global keyboard/mouse hooks and the cursor clip
+		 * disabled so the local machine stays usable while testing.
+		 */
+		init_input(g_AppWindow);
+	}
 	init_send_io();
 
 

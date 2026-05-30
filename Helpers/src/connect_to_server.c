@@ -50,8 +50,18 @@ bool connect_to_server(const char* address,
 		return res;
 	}
 
-	res = send_one_byte(socket, 
+	res = send_one_byte(socket,
 						notify_on_data_recived);
+	if (!res) {
+		return res;
+	}
+
+	/*
+	 * Public key for the end-to-end key exchange, sent as the last field of the
+	 * connection init data (a zero-length blob when E2E is off). The relay reads
+	 * it and later hands each client its peer's key over the control channel.
+	 */
+	res = network_send_public_key(socket);
 	if (!res) {
 		return res;
 	}

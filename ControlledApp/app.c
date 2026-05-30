@@ -16,6 +16,7 @@
 #include <app_instances.h>
 #include <monitors.h>
 #include <control_channel.h>
+#include <crypto.h>
 
 #include "app.h"
 #include "send_screen_buffer.h"
@@ -52,6 +53,21 @@ void _handle_input() {
 			continue;
 		}
 
+		ProgramConfig* config = get_program_config();
+		if (config->debug_mode) {
+			/*
+			 * Debug mode: never apply remote input so the local mouse and
+			 * keyboard stay usable while testing.
+			 */
+			continue;
+		}
+		if (input.type == KeyboadInputType && !config->allow_remote_keyboard_control) {
+			continue;
+		}
+		if (input.type == MouseInputType && !config->allow_remote_mouse_control) {
+			continue;
+		}
+
 		
 		send_input(input, &g_MonitorInfo);
 
@@ -59,6 +75,11 @@ void _handle_input() {
 }
 
 void _on_all_clients_connected() {
+	/*
+	 * By the time this fires the control channel has already completed the
+	 * end-to-end key exchange (peer public key delivered by the relay), so the
+	 * session key is ready and the data threads below can seal/open right away.
+	 */
 	Rect screen_rect;
 	ZeroMemory(&screen_rect, sizeof(screen_rect));
 
@@ -123,6 +144,10 @@ void run_app() {
 
 	init_error(shut_down);
 	create_debug_console();
+
+	/* Prove end-to-end encryption is active: status, key id, self-test and
+	 * sampled per-frame logs to the console and to bin\client_e2e.log. */
+	crypto_log_enable();
 
 	ProgramConfig* config = get_program_config();
 

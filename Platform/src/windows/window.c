@@ -32,6 +32,12 @@ static int g_NextWindowIndex;
 
 static LONG g_LastWindowStyle;
 
+static bool g_StartWindowed = false;
+
+void set_window_start_windowed(bool windowed) {
+	g_StartWindowed = windowed;
+}
+
 WIN32Window* _create_win32Window(HWND hWnd, 
 								 HWND toolbarHWND,
 								 WindowStruct* window_struct) {
@@ -311,16 +317,30 @@ void show_window(PlatformWindow window) {
 
 	PlatformConfig* config = get_platform_config();
 
-	ShowWindow(win32_window->hWnd, 
+	ShowWindow(win32_window->hWnd,
 			   config->cmdShow);
 
 	win32_window->window_border_height
 		= _calculate_border_size(win32_window->hWnd);
 
-	SetWindowLongA(
-		win32_window->hWnd,
-		GWL_STYLE,
-		WS_POPUPWINDOW | WS_VISIBLE);
+	if (g_StartWindowed) {
+		/*
+		 * Debug / windowed mode: keep a normal titled window so the screen does
+		 * not take over the whole display and stays easy to move around.
+		 */
+		g_LastWindowStyle = WINDOW_STYLE_OVERLAPED_NO_RESIZE;
+
+		SetWindowLongA(
+			win32_window->hWnd,
+			GWL_STYLE,
+			WINDOW_STYLE_OVERLAPED_NO_RESIZE | WS_VISIBLE);
+	}
+	else {
+		SetWindowLongA(
+			win32_window->hWnd,
+			GWL_STYLE,
+			WS_POPUPWINDOW | WS_VISIBLE);
+	}
 
 
 

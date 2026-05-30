@@ -143,6 +143,7 @@
     <ClInclude Include="app_instances.h" />
     <ClInclude Include="include\app_instances.h" />
     <ClInclude Include="include\console.h" />
+    <ClInclude Include="include\crypto.h" />
     <ClInclude Include="include\input.h" />
     <ClInclude Include="include\monitors.h" />
     <ClInclude Include="include\platform_config.h" />
@@ -152,7 +153,7 @@
     <ClInclude Include="include\network.h" />
     <ClInclude Include="include\platform.h" />
     <ClInclude Include="include\processes.h" />
-    <ClInclude Include="include\threads.h" />
+    <ClInclude Include="include\platform_threads.h" />
     <ClInclude Include="include\timer.h" />
     <ClInclude Include="include\window.h" />
     <ClInclude Include="platfrom_memory_utils.h" />
@@ -163,6 +164,7 @@
     <ClCompile Include="src\platfrom_memory_utils.c" />
     <ClCompile Include="src\windows\app_instances.c" />
     <ClCompile Include="src\windows\console.c" />
+    <ClCompile Include="src\windows\crypto.c" />
     <ClCompile Include="src\windows\error.c" />
     <ClCompile Include="src\windows\event_loop.c" />
     <ClCompile Include="src\windows\input.c" />

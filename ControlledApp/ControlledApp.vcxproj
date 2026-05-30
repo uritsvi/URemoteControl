@@ -76,6 +76,7 @@
     <ExternalIncludePath>$(ProjectDir)..\Platform\include;$(ProjectDir)..\Utils\include;$(ProjectDir)..\Helpers\include;$(ProjectDir)..\ScreenDelta\include;$(ProjectDir)..\Common;$(ExternalIncludePath)</ExternalIncludePath>
     <LibraryPath>$(ProjectDir)..\Platform\lib;$(ProjectDir)..\Utils\lib;$(ProjectDir)..\Helpers\lib;$(ProjectDir)..\ScreenDelta\lib;$(LibraryPath)</LibraryPath>
     <LibraryWPath>$(LibraryWPath)</LibraryWPath>
+    <IncludePath>C:\src\URemoteControl\ControlledApp\..\Platform\include;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>..\bin</OutDir>

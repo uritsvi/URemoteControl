@@ -16,7 +16,7 @@
 #include <input.h>
 #include <console.h>
 #include <stdio.h>
-#include <threads.h>
+#include <platform_threads.h>
 #include <screen_delta.h>
 #include <read_ini.h>
 
@@ -46,7 +46,6 @@ void on_screen_changed(
 			g_Window,
 			config->target_bit_count,
 			delta->buffer + delta->rects[i].offset,
-			delta->rects[i].rect,
 			delta->rects[i].rect);
 
 

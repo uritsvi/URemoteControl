@@ -3,6 +3,8 @@ package Tunnel
 import (
 	"Server/Client"
 	"Server/ControlChannel"
+	"fmt"
+	"os"
 	"sync"
 )
 
@@ -47,6 +49,16 @@ func (tunnel *Tunnel) RunTunnel() {
 func read(params *tunnelRunParams,
 	client *Client.Client) {
 
+	// A client closing its connection (window closed, app exited, network
+	// drop) surfaces as a read error from the socket wrapper. Treat it as a
+	// clean end of session instead of crashing the server with a stack trace.
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("A client disconnected; ending session.")
+			os.Exit(0)
+		}
+	}()
+
 	for {
 		size := client.SocketWrapper.ReadUin32()
 
@@ -81,6 +93,13 @@ func read(params *tunnelRunParams,
 
 func write(params *tunnelRunParams,
 	client *Client.Client) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("A client disconnected; ending session.")
+			os.Exit(0)
+		}
+	}()
 
 	for {
 		size := <-params.sizeChan
