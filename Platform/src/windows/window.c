@@ -369,23 +369,30 @@ void draw_to_window(PlatformWindow window,
 
 
 	HDC window_dc = GetDC(WIN32Window->hWnd);
+	if (window_dc == NULL) {
+		return;
+	}
 
-	
 	SetDIBitsToDevice(window_dc,
-		rect.left, 
+		rect.left,
 		rect.top,
-		width - 1, 
+		width - 1,
 		height,
 		0,
 		0,
 		0,
 		height,
-		buffer, 
-		&bi, 
+		buffer,
+		&bi,
 		DIB_RGB_COLORS);
 
-
-
+	/*
+	 * GetDC hands out a DC from the per-process cache; it MUST be released or
+	 * the process leaks a GDI handle every frame and hits the default 10,000
+	 * GDI-object limit within minutes, after which GetDC returns NULL, drawing
+	 * stops and the window stops responding.
+	 */
+	ReleaseDC(WIN32Window->hWnd, window_dc);
 }
 
 #ifdef _WIN32
