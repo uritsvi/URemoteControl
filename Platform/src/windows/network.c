@@ -7,9 +7,6 @@
 #include <stdbool.h>
 #include <string.h>
 
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-
 #include <platfrom_memory_utils.h>
 #include <Common.h>
 
@@ -19,15 +16,11 @@
 
 #pragma comment (lib, "Ws2_32.lib")
 #pragma comment (lib, "Mswsock.lib")
-#pragma comment (lib, "libssl.lib")
-#pragma comment (lib, "libcrypto.lib")
 
 typedef struct {
 	SOCKET socket;
 	bool closed;
 	Socket out;
-	SSL* ssl;
-	bool use_tls;
 } WIN32Socket;
 
 static WIN32Socket* g_Sockets[MAX_OBJECTS] = { 0 };
@@ -37,72 +30,8 @@ static int g_NextReceiveSocketIndex;
 
 static int g_MaxSendBufferSize;
 
-static bool g_UseTls = false;
-static char g_TlsServerName[DEFAULT_BUFFER_SIZE] = { 0 };
-static char g_TlsCaCertPath[DEFAULT_BUFFER_SIZE] = { 0 };
-
-static SSL_CTX* g_SslCtx = NULL;
-
 bool _socket_send(WIN32Socket* socket, char* buffer, int size);
 bool _socket_receive(WIN32Socket* socket, char* buffer, int size);
-
-void network_set_tls_config(bool use_tls, const char* server_name, const char* ca_cert_path) {
-	g_UseTls = use_tls;
-	if (server_name != NULL) {
-		strncpy_s(g_TlsServerName, DEFAULT_BUFFER_SIZE, server_name, _TRUNCATE);
-	} else {
-		g_TlsServerName[0] = '\0';
-	}
-	if (ca_cert_path != NULL) {
-		strncpy_s(g_TlsCaCertPath, DEFAULT_BUFFER_SIZE, ca_cert_path, _TRUNCATE);
-	} else {
-		g_TlsCaCertPath[0] = '\0';
-	}
-}
-
-static bool _init_ssl_ctx(void) {
-	if (g_SslCtx != NULL) {
-		return true;
-	}
-
-	SSL_library_init();
-	SSL_load_error_strings();
-	OpenSSL_add_all_algorithms();
-
-	g_SslCtx = SSL_CTX_new(TLS_client_method());
-	if (g_SslCtx == NULL) {
-		ERR_print_errors_fp(stderr);
-		return false;
-	}
-
-	SSL_CTX_set_min_proto_version(g_SslCtx, TLS1_2_VERSION);
-
-	if (g_TlsCaCertPath[0] != '\0') {
-		if (SSL_CTX_load_verify_locations(g_SslCtx, g_TlsCaCertPath, NULL) != 1) {
-			ERR_print_errors_fp(stderr);
-			SSL_CTX_free(g_SslCtx);
-			g_SslCtx = NULL;
-			return false;
-		}
-	} else {
-		if (SSL_CTX_set_default_verify_paths(g_SslCtx) != 1) {
-			ERR_print_errors_fp(stderr);
-			SSL_CTX_free(g_SslCtx);
-			g_SslCtx = NULL;
-			return false;
-		}
-	}
-
-	return true;
-}
-
-static void _cleanup_ssl_ctx(void) {
-	if (g_SslCtx != NULL) {
-		SSL_CTX_free(g_SslCtx);
-		g_SslCtx = NULL;
-	}
-	EVP_cleanup();
-}
 
 bool init_networking(int max_send_buffer_size) {
 
@@ -114,13 +43,6 @@ bool init_networking(int max_send_buffer_size) {
 
 	g_MaxSendBufferSize = max_send_buffer_size;
 
-	if (g_UseTls) {
-		if (!_init_ssl_ctx()) {
-			WSACleanup();
-			return false;
-		}
-	}
-
 	return true;
 
 }
@@ -129,11 +51,6 @@ bool clean_up_networking() {
 	for (int i = 0; i < MAX_OBJECTS; i++) {
 		if (g_Sockets[i] != NULL) {
 			WIN32Socket* s = g_Sockets[i];
-			if (s->use_tls && s->ssl != NULL) {
-				SSL_shutdown(s->ssl);
-				SSL_free(s->ssl);
-				s->ssl = NULL;
-			}
 			if (s->socket != INVALID_SOCKET) {
 				closesocket(s->socket);
 				s->socket = INVALID_SOCKET;
@@ -142,7 +59,6 @@ bool clean_up_networking() {
 			g_Sockets[i] = NULL;
 		}
 	}
-	_cleanup_ssl_ctx();
 	int res = WSACleanup();
 	if (res != 0) {
 		return false;
@@ -484,41 +400,6 @@ bool create_socket(const char* address,
 	_socket->socket = win32_socket;
 	_socket->closed = false;
 	_socket->out = g_NextSendSocketIndex;
-	_socket->ssl = NULL;
-	_socket->use_tls = false;
-
-	if (g_UseTls && g_SslCtx != NULL) {
-		SSL* ssl = SSL_new(g_SslCtx);
-		if (ssl == NULL) {
-			free(_socket);
-			closesocket(win32_socket);
-			return false;
-		}
-
-		SSL_set_fd(ssl, (int)win32_socket);
-
-		const char* sni_name = (g_TlsServerName[0] != '\0') ? g_TlsServerName : address;
-		SSL_set_tlsext_host_name(ssl, sni_name);
-
-		if (SSL_connect(ssl) != 1) {
-			ERR_print_errors_fp(stderr);
-			SSL_free(ssl);
-			free(_socket);
-			closesocket(win32_socket);
-			return false;
-		}
-
-		if (SSL_get_verify_result(ssl) != X509_V_OK) {
-			SSL_shutdown(ssl);
-			SSL_free(ssl);
-			free(_socket);
-			closesocket(win32_socket);
-			return false;
-		}
-
-		_socket->ssl = ssl;
-		_socket->use_tls = true;
-	}
 
 	*out = g_NextSendSocketIndex++;
 	g_Sockets[*out] = _socket;
@@ -527,25 +408,9 @@ bool create_socket(const char* address,
 
 }
 
-bool _socket_send(WIN32Socket* socket, 
-				  char* buffer, 
+bool _socket_send(WIN32Socket* socket,
+				  char* buffer,
 				  int size) {
-	
-	if (socket->use_tls && socket->ssl != NULL) {
-		int total = 0;
-		while (total < size) {
-			int n = SSL_write(socket->ssl, buffer + total, size - total);
-			if (n <= 0) {
-				int err = SSL_get_error(socket->ssl, n);
-				if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-					continue;
-				}
-				return false;
-			}
-			total += n;
-		}
-		return true;
-	}
 
 	int res = send(socket->socket,
 		buffer,
@@ -558,28 +423,9 @@ bool _socket_send(WIN32Socket* socket,
 	return true;
 }
 
-bool _socket_receive(WIN32Socket* socket, 
-					 char* buffer, 
+bool _socket_receive(WIN32Socket* socket,
+					 char* buffer,
 				     int size) {
-	
-	if (socket->use_tls && socket->ssl != NULL) {
-		int total = 0;
-		while (total < size) {
-			int n = SSL_read(socket->ssl, buffer + total, size - total);
-			if (n <= 0) {
-				int err = SSL_get_error(socket->ssl, n);
-				if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-					continue;
-				}
-				if (err == SSL_ERROR_ZERO_RETURN && total > 0) {
-					break;
-				}
-				return false;
-			}
-			total += n;
-		}
-		return true;
-	}
 
 	int i = 0;
 	while (i < size) {

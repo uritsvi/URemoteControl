@@ -15,11 +15,9 @@ The Go server is a **blind relay**: for the screen and input tunnels it reads a
 length‑prefixed frame from one client and forwards the exact bytes to the other
 (`Server/Tunnel/Tunnel.go`). Because of that, encrypting the payload *inside the
 C clients* gives true end‑to‑end secrecy — **the server only ever sees
-ciphertext and cannot read or modify the screen or input data**. This is a
-stronger property than the pre‑existing TLS support (which only protects each
-hop *to the server*, where the server could see plaintext).
-
-Both layers can be used together (TLS for transport + E2E for the payload).
+ciphertext and cannot read or modify the screen or input data**. E2E is the only
+encryption layer in the project; an earlier transport‑TLS‑to‑the‑server option
+was removed in favour of relying on E2E alone.
 
 ### Cipher & key agreement
 - **AES‑256‑GCM** (authenticated encryption) via OpenSSL's EVP API. GCM provides
@@ -178,9 +176,6 @@ compression_level=1
 max_send_buffer=65536
 num_of_delta_parts=10
 capture_full_screen_interval=1000   ; full‑frame refresh timer (ms)
-use_tls=0
-tls_server_name=
-tls_ca_cert_path=
 allow_remote_keyboard_control=0
 allow_remote_mouse_control=0
 e2e_key=URemoteControl-demo-shared-secret-change-me   ; shared E2E passphrase
@@ -248,8 +243,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\stop-debug.ps1
   passive relay only) — and in this build an empty value disables E2E entirely.
 - AES‑GCM with a random 96‑bit nonce per message is safe for the message volumes
   here; the per‑frame fresh nonce avoids nonce reuse.
-- E2E and TLS are independent and composable: TLS protects the hop to the server,
-  E2E ensures the server itself can never read the payload.
+- E2E is the sole encryption layer: it ensures the relay server itself can never
+  read the payload, which is a stronger guarantee than transport TLS to the
+  server (since the relay would terminate TLS and see plaintext).
 - **Verification:** each client writes `bin/client_e2e_<pid>.log`. A successful
   run shows the **same `key_id`** on both peers (proving the DH agreed on one
   key) and `GCM auth OK` on every opened frame.

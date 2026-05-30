@@ -21,9 +21,6 @@
 
 void init() {
 	ProgramConfig* config = get_program_config();
-	network_set_tls_config(config->use_tls,
-		config->tls_server_name[0] ? config->tls_server_name : NULL,
-		config->tls_ca_cert_path[0] ? config->tls_ca_cert_path : NULL);
 	crypto_configure(config->e2e_key);
 	if (crypto_is_configured() && !crypto_generate_keypair()) {
 		platform_exit_with_error("Failed to generate end-to-end key pair\n");

@@ -39,9 +39,6 @@
 
 #define INI_CAPTURE_FULL_SCREEN_INTERVALT "capture_full_screen_interval"
 
-#define INI_USE_TLS "use_tls"
-#define INI_TLS_SERVER_NAME "tls_server_name"
-#define INI_TLS_CA_CERT_PATH "tls_ca_cert_path"
 #define INI_ALLOW_REMOTE_KEYBOARD_CONTROL "allow_remote_keyboard_control"
 #define INI_ALLOW_REMOTE_MOUSE_CONTROL "allow_remote_mouse_control"
 

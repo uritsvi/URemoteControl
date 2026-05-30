@@ -38,34 +38,24 @@ While controlling another PC You can enter/exit "control mode" by pressing the `
 While in control mode you can switch screens by pressing the apper number keys. \
 You can't control the mouse or the keyboard while in control mode
 
-<h2>TLS Encryption</h2>
-TLS encryption for screen and input data is supported. To enable:
-
-<h3>Server (Go)</h3>
-- Generate a certificate: run ```Server\generate_cert.bat``` (requires OpenSSL in PATH)
-- Set environment variables before starting the server:
-  - ```UREMOTE_TLS_CERT``` - path to server certificate (.crt)
-  - ```UREMOTE_TLS_KEY``` - path to server private key (.key)
-
-<h3>Clients (Controller and Controlled)</h3>
+<h2>Remote Control Flags</h2>
 Add to ```config.ini``` in the [config] section:
-- ```use_tls=1``` - enable TLS
-- ```tls_server_name=localhost``` - server hostname for SNI (use server address or hostname from cert)
-- ```tls_ca_cert_path=path\to\server.crt``` - path to CA cert or server cert for verification (leave empty to use system CA store)
 - ```allow_remote_keyboard_control=0``` - disable applying remote keyboard events on the controlled PC
 - ```allow_remote_mouse_control=0``` - disable applying remote mouse events on the controlled PC
 
 Both input flags default to ```0``` when missing.
 
 <h2>End-to-End Encryption</h2>
-On top of (optional) TLS to the server, the clients can encrypt the screen and
-input payloads end-to-end with **AES-256-GCM**, so the relay server only ever
-forwards ciphertext and can never read the data. Set the **same** secret on both
-clients in ```config.ini``` (```[config]``` section):
+The clients encrypt the screen and input payloads end-to-end with
+**AES-256-GCM**, so the relay server only ever forwards ciphertext and can never
+read the data. Set the **same** secret on both clients in ```config.ini```
+(```[config]``` section):
 - ```e2e_key=your-strong-shared-secret``` — enables E2E when non-empty (leave empty to disable).
 
-The key is derived with PBKDF2-HMAC-SHA256; a fresh random nonce is used per
-frame. The Go server needs no configuration for this — it stays a blind relay.
+The session key is established with an ephemeral **X25519** Diffie-Hellman
+exchange and derived with **HKDF-SHA256** (the ```e2e_key``` authenticates the
+exchange); a fresh random nonce is used per frame. The Go server needs no
+configuration for this — it stays a blind relay.
 See [CHANGES_E2E_DEBUG.md](CHANGES_E2E_DEBUG.md) for full details.
 
 <h2>Debug mode and running locally</h2>

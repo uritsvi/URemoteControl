@@ -3,7 +3,6 @@ package ListenForClients
 import (
 	"Server/Client"
 	"Server/SocketWrapper"
-	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
@@ -65,17 +64,9 @@ func StartListenForClients(
 	clientsConnected := false
 	mutex := sync.Mutex{}
 
-	certFile := os.Getenv("UREMOTE_TLS_CERT")
-	keyFile := os.Getenv("UREMOTE_TLS_KEY")
-	useTls := certFile != "" && keyFile != ""
-
 	host := resolveHost()
 
-	if useTls {
-		fmt.Println("Start listening on " + host + ":" + port + " (TLS enabled)")
-	} else {
-		fmt.Println("Start listening on " + host + ":" + port)
-	}
+	fmt.Println("Start listening on " + host + ":" + port)
 
 	go func() {
 		time.Sleep(NoClientsConnectedTimeout * time.Second)
@@ -87,22 +78,7 @@ func StartListenForClients(
 		mutex.Unlock()
 	}()
 
-	var listener net.Listener
-	var _error error
-
-	if useTls {
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-		if err != nil {
-			panic("Failed to load TLS certificate: " + err.Error())
-		}
-		tlsConfig := &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
-		}
-		listener, _error = tls.Listen(connectionType, host+":"+port, tlsConfig)
-	} else {
-		listener, _error = net.Listen(connectionType, host+":"+port)
-	}
+	listener, _error := net.Listen(connectionType, host+":"+port)
 
 	if _error != nil {
 		panic("Failed to create listen socket, error msg" + _error.Error())

@@ -169,32 +169,6 @@ void read_ini(ProgramConfig* config){
 
 	res = GetPrivateProfileStringA(
 		INI_CONFIG_SECTION_NAME,
-		INI_USE_TLS,
-		"0",
-		buffer,
-		DEFAULT_BUFFER_SIZE,
-		ini_file_path);
-
-	config->use_tls = _parse_ini_bool(buffer);
-
-	res = GetPrivateProfileStringA(
-		INI_CONFIG_SECTION_NAME,
-		INI_TLS_SERVER_NAME,
-		"",
-		config->tls_server_name,
-		DEFAULT_BUFFER_SIZE,
-		ini_file_path);
-
-	res = GetPrivateProfileStringA(
-		INI_CONFIG_SECTION_NAME,
-		INI_TLS_CA_CERT_PATH,
-		"",
-		config->tls_ca_cert_path,
-		DEFAULT_BUFFER_SIZE,
-		ini_file_path);
-
-	res = GetPrivateProfileStringA(
-		INI_CONFIG_SECTION_NAME,
 		INI_ALLOW_REMOTE_KEYBOARD_CONTROL,
 		"0",
 		buffer,

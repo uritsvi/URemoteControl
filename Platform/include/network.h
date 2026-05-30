@@ -7,8 +7,6 @@
 
 typedef int Socket;
 
-void network_set_tls_config(bool use_tls, const char* server_name, const char* ca_cert_path);
-
 bool init_networking(int max_send_buffer_size);
 
 bool clean_up_networking();

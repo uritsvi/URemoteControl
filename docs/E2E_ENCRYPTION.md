@@ -36,23 +36,13 @@ starts forwarding the data tunnels only after **all six** are connected.
 
 ---
 
-## 2. Two independent layers of protection
+## 2. End-to-end encryption
 
-URemoteControl can apply **two** layers, which compose:
-
-1. **TLS (transport encryption)** — protects each hop *to the server*. Enabled
-   with `use_tls=1` in `config.ini`; the server is given a certificate via the
-   `UREMOTE_TLS_CERT` / `UREMOTE_TLS_KEY` env vars. With TLS, the link between a
-   client and the relay is encrypted, but **the relay terminates TLS and can see
-   the plaintext** it forwards.
-
-2. **End-to-end encryption (E2E)** — protects the *payload* between the two
-   clients. The clients encrypt screen/input data with a key the **server never
-   learns**, so the relay only ever forwards opaque ciphertext. This is the
-   stronger property and the subject of this document.
-
-Using both means: TLS hides traffic from the network, and E2E hides the payload
-even from the relay itself.
+**End-to-end encryption (E2E)** protects the *payload* between the two clients.
+The clients encrypt screen/input data with a key the **server never learns**, so
+the relay only ever forwards opaque ciphertext — it can never read or modify the
+screen or input data it carries. This is the only encryption layer in
+URemoteControl and the subject of this document.
 
 ---
 
@@ -292,7 +282,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\stop-debug.ps1
 | Server | `Server/ListenForClients/ListenForClients.go` | reads the public-key handshake field |
 | Server | `Server/ControlChannel/ControlTunnel.go` | `SendPublicKeys` relays each peer's key |
 | Server | `Server/ServerMain/ServerMain.go` | calls `SendPublicKeys` at all-connected |
-| TLS | `Server/generate_cert.bat`, `network.c` (`network_set_tls_config`) | optional transport TLS |
 
 ---
 

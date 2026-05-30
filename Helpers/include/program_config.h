@@ -25,9 +25,6 @@ typedef struct {
 
 	int capture_full_screen_interval;
 
-	bool use_tls;
-	char tls_server_name[DEFAULT_BUFFER_SIZE];
-	char tls_ca_cert_path[DEFAULT_BUFFER_SIZE];
 	bool allow_remote_keyboard_control;
 	bool allow_remote_mouse_control;
 
