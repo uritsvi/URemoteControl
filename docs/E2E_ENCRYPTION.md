@@ -48,16 +48,16 @@ URemoteControl and the subject of this document.
 
 ## 3. Cryptographic building blocks
 
-All crypto uses **OpenSSL 3.x** (vcpkg `x64-windows`), wrapped in
+All crypto uses **libsodium** (vcpkg `x64-windows`), wrapped in
 [`Platform/src/windows/crypto.c`](../Platform/src/windows/crypto.c).
 
-| Purpose                | Algorithm            | Notes                                            |
-|------------------------|----------------------|--------------------------------------------------|
-| Key agreement          | **X25519 ECDH**      | Ephemeral key pair generated fresh per run       |
-| Key derivation         | **HKDF-SHA256**      | Turns the shared secret into a 256-bit AES key   |
-| Authenticated encryption| **AES-256-GCM**     | Confidentiality + integrity (tamper detection)   |
-| Nonce                  | 96-bit random        | Fresh per frame via `RAND_bytes`                 |
-| Authentication binding | pre-shared passphrase| Mixed into HKDF `info` (see §6)                  |
+| Purpose                | Algorithm                | Notes                                            |
+|------------------------|--------------------------|--------------------------------------------------|
+| Key agreement          | **X25519 ECDH**          | `crypto_box_keypair` / `crypto_scalarmult`; ephemeral per run |
+| Key derivation         | **BLAKE2b**              | `crypto_generichash` turns the shared secret into a 256-bit key |
+| Authenticated encryption| **XChaCha20-Poly1305**  | `crypto_aead_xchacha20poly1305_ietf`; confidentiality + integrity |
+| Nonce                  | 192-bit random           | Fresh per frame via `randombytes_buf`            |
+| Authentication binding | pre-shared passphrase    | Hashed into the BLAKE2b derivation (see §6)      |
 
 ### Why these choices
 - **X25519** is a modern, fast, misuse-resistant elliptic-curve Diffie-Hellman.
@@ -67,8 +67,9 @@ All crypto uses **OpenSSL 3.x** (vcpkg `x64-windows`), wrapped in
 - **Ephemeral** key pairs (new every session) give **forward secrecy**:
   recording today's ciphertext and stealing the passphrase tomorrow does not
   decrypt it, because the private keys are already gone.
-- **AES-256-GCM** authenticates as well as encrypts: a single flipped bit makes
-  decryption fail, so the relay cannot tamper with frames undetected.
+- **XChaCha20-Poly1305** authenticates as well as encrypts: a single flipped bit
+  makes decryption fail, so the relay cannot tamper with frames undetected. Its
+  192-bit nonce makes random per-frame nonces safe without a counter.
 
 ---
 
@@ -159,10 +160,10 @@ callback();                                         // now data threads may seal
      |<------ ALL_CLIENTS_CONNECTED --|--- ALL_CLIENTS_CONNECTED ----->|
      |<------ peer key = B -----------|--- peer key = A -------------->|
      |                                |                                |
-   derive K = HKDF(ECDH(a, B), ...)   |        derive K = HKDF(ECDH(b, A), ...)
+   derive K = BLAKE2b(ECDH(a, B), ...)|        derive K = BLAKE2b(ECDH(b, A), ...)
      |                                |                                |
-     |== AES-256-GCM screen frames ==>|== forwarded ciphertext =======>|  (open with K)
-     |<= AES-256-GCM input frames ====|<= forwarded ciphertext ========|  (sealed with K)
+     |== XChaCha20 screen frames ====>|== forwarded ciphertext =======>|  (open with K)
+     |<= XChaCha20 input frames ======|<= forwarded ciphertext ========|  (sealed with K)
 ```
 
 Because ECDH is symmetric — `ECDH(a, B) == ECDH(b, A)` — both sides arrive at the
@@ -176,14 +177,13 @@ crossing the wire.
 `crypto_derive_session_key(peer_pub, len)`:
 
 1. **ECDH:** `shared = X25519(our_private_key, peer_public_key)` → 32-byte secret.
-2. **HKDF-SHA256:**
+2. **BLAKE2b:**
    ```
-   K = HKDF-SHA256(
-         ikm  = shared,
-         salt = "URemoteControl-e2e-v2",
-         info = "URemoteControl-e2e-session-key-v2" || passphrase )
+   K = BLAKE2b-256(
+         "URemoteControl-e2e-session-key-v3" || shared || passphrase )
    ```
-   produces the 32-byte (AES-256) session key.
+   (a single keyless `crypto_generichash` over the label, shared secret, and
+   passphrase) produces the 32-byte XChaCha20-Poly1305 session key.
 
 The session key is then used by `crypto_seal` / `crypto_open` for every frame.
 
@@ -191,18 +191,17 @@ The session key is then used by `crypto_seal` / `crypto_open` for every frame.
 
 ## 6. The passphrase now *authenticates* (it is not the key)
 
-In the previous design the AES key was derived directly from the `e2e_key`
-passphrase (PBKDF2). Now the key comes from ECDH, and the passphrase has a
-different job:
+In an earlier design the symmetric key was derived directly from the `e2e_key`
+passphrase. Now the key comes from ECDH, and the passphrase has a different job:
 
 - **It gates the feature.** Empty `e2e_key` ⇒ E2E off ⇒ no keypair, no handshake
   key field, plaintext frames (byte-for-byte the old behavior).
-- **It authenticates the exchange.** The passphrase is mixed into the HKDF
-  `info`. Two peers therefore derive the *same* `K` only if they share the same
-  passphrase. This defeats an **active** relay that tries to man-in-the-middle
-  the exchange by substituting its own public keys: it can complete two separate
-  ECDH handshakes, but without the passphrase its derived keys won't match the
-  clients', and the first AES-GCM frame fails to authenticate.
+- **It authenticates the exchange.** The passphrase is hashed into the BLAKE2b
+  key derivation. Two peers therefore derive the *same* `K` only if they share
+  the same passphrase. This defeats an **active** relay that tries to
+  man-in-the-middle the exchange by substituting its own public keys: it can
+  complete two separate ECDH handshakes, but without the passphrase its derived
+  keys won't match the clients', and the first frame fails to authenticate.
 
 > Set the **same** `e2e_key` on both peers. A high-entropy value is recommended.
 > An empty value means anonymous ECDH (safe against a *passive* relay only) — and
@@ -215,7 +214,7 @@ different job:
 Every encrypted payload (screen delta or input event) is sealed as:
 
 ```
-[ uint32 length ][ 12-byte nonce ][ ciphertext (= plaintext length) ][ 16-byte GCM tag ]
+[ uint32 length ][ 24-byte nonce ][ ciphertext (= plaintext length) ][ 16-byte Poly1305 tag ]
 ```
 
 The `uint32 length` prefix is exactly what the relay's data tunnel reads and
@@ -245,13 +244,13 @@ public key), not user data.
 Each client writes a proof log next to its executable:
 `bin/client_e2e_<pid>.log`. A healthy session shows:
 
-- `status: ENABLED  key-exchange=X25519 ECDH  kdf=HKDF-SHA256  cipher=AES-256-GCM`
+- `status: ENABLED  key-exchange=X25519 ECDH  kdf=BLAKE2b  cipher=XChaCha20-Poly1305`
 - `session key established ... key_id=XXXXXXXX` — **the `key_id` is identical on
-  both peers**. `key_id` is the first 4 bytes of SHA-256 of the derived key;
+  both peers**. `key_id` is the first 4 bytes of BLAKE2b of the derived key;
   matching ids prove ECDH agreed on the same key purely from the exchanged
   public keys.
-- `SELF-TEST decrypt round-trip: PASS` and `SELF-TEST tamper rejected by GCM auth: PASS`.
-- `seal #N ...` on the sender and `open #N ... GCM auth OK` on the receiver.
+- `SELF-TEST decrypt round-trip: PASS` and `SELF-TEST tamper rejected by AEAD auth: PASS`.
+- `seal #N ...` on the sender and `open #N ... AEAD auth OK` on the receiver.
 
 On the server side, the log prints each connection with its `PublicKey:[..32 bytes..]`,
 showing the key arriving as part of the handshake (index 0 and index 1 each show
@@ -271,7 +270,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\stop-debug.ps1
 
 | Area | File | Role |
 |------|------|------|
-| Crypto | `Platform/include/crypto.h`, `Platform/src/windows/crypto.c` | X25519 keypair, HKDF, AES-256-GCM seal/open, proof logging |
+| Crypto | `Platform/include/crypto.h`, `Platform/src/windows/crypto.c` | X25519 keypair, BLAKE2b KDF, XChaCha20-Poly1305 seal/open (libsodium), proof logging |
 | Network | `Platform/include/network.h`, `Platform/src/windows/network.c` | `network_send_public_key`, `network_receive_peer_key`, encrypted data helpers |
 | Handshake (client) | `Helpers/src/connect_to_server.c` | sends the public key as the last handshake field |
 | Key derive (client) | `Helpers/include/control_chanel.c` | reads peer key after ALL_CLIENTS_CONNECTED, derives session key |
@@ -290,14 +289,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\stop-debug.ps1
 **Properties**
 - The relay sees only public keys and ciphertext; it cannot read screen or input.
 - Forward secrecy from ephemeral X25519 keys.
-- AES-256-GCM detects any tampering/corruption of frames.
+- XChaCha20-Poly1305 detects any tampering/corruption of frames.
 - The pre-shared passphrase authenticates the exchange against an active MITM.
 
 **Limitations / notes**
 - Both peers must be configured with the **same** `e2e_key`; a mismatch causes a
-  clean failure (GCM auth fails / key exchange errors), not silent insecurity.
+  clean failure (AEAD auth fails / key exchange errors), not silent insecurity.
 - An **empty** passphrase disables E2E entirely (plaintext) — by design, for
   debugging and wire-compatibility.
 - The passphrase guards against an active MITM; treat it as a real secret.
-- Nonces are random 96-bit per frame, which is safe for these message volumes;
-  there is no long-lived counter to overflow.
+- Nonces are random 192-bit per frame, which is safe for these message volumes;
+  the large XChaCha20 nonce makes random nonces collision-safe with no counter.

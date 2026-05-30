@@ -6,37 +6,24 @@
 #include <share.h>
 #include <process.h>
 
-#include <openssl/evp.h>
-#include <openssl/rand.h>
-#include <openssl/err.h>
-#include <openssl/sha.h>
-#include <openssl/kdf.h>
-#include <openssl/core_names.h>
-#include <openssl/params.h>
+#include <sodium.h>
 
 #include <Common.h>
 #include <platform.h>
 
 #include "crypto.h"
 
-#pragma comment(lib, "libcrypto.lib")
+#pragma comment(lib, "libsodium.lib")
 
 /*
- * Fixed application salt for the HKDF key derivation. A fixed salt is fine here:
- * the entropy comes from the per-session ephemeral Diffie-Hellman secret, and
- * the salt only domain-separates this application from others.
+ * Domain-separation label for the BLAKE2b key derivation. It is hashed together
+ * with the shared secret and the pre-shared passphrase so two peers only derive
+ * the same key if they share the passphrase - this authenticates the otherwise
+ * anonymous Diffie-Hellman exchange against an active man-in-the-middle relay.
  */
-static const unsigned char g_Salt[] = "URemoteControl-e2e-v2";
+static const char g_InfoLabel[] = "URemoteControl-e2e-session-key-v3";
 
-/*
- * HKDF "info" label. The optional pre-shared passphrase is appended after this
- * label (see crypto_derive_session_key) so two peers only derive the same key
- * if they share the passphrase - this authenticates the otherwise anonymous
- * Diffie-Hellman exchange against an active man-in-the-middle relay.
- */
-static const char g_InfoLabel[] = "URemoteControl-e2e-session-key-v2";
-
-#define CRYPTO_KEY_SIZE 32 /* AES-256 */
+#define CRYPTO_KEY_SIZE crypto_aead_xchacha20poly1305_ietf_KEYBYTES /* 32 */
 
 static bool g_Configured = false;
 static bool g_Enabled = false;
@@ -45,8 +32,9 @@ static unsigned char g_Key[CRYPTO_KEY_SIZE];
 /* Optional pre-shared authentication secret (copied from config e2e_key). */
 static char g_Passphrase[DEFAULT_BUFFER_SIZE] = { 0 };
 
-/* This process's ephemeral X25519 key pair (private + public). */
-static EVP_PKEY* g_KeyPair = NULL;
+/* This process's ephemeral X25519 key pair. */
+static unsigned char g_PublicKey[crypto_box_PUBLICKEYBYTES];
+static unsigned char g_SecretKey[crypto_box_SECRETKEYBYTES];
 
 /* E2E proof logging (opt-in per process via crypto_log_enable). */
 static bool g_LogWanted = false;
@@ -54,6 +42,19 @@ static bool g_LogEnabled = false;
 static FILE* g_LogFile = NULL;
 static unsigned long g_SealCount = 0;
 static unsigned long g_OpenCount = 0;
+
+/* sodium_init must run once before any libsodium call; returns false on error. */
+static bool _ensure_sodium(void) {
+	static bool initialized = false;
+	if (initialized) {
+		return true;
+	}
+	if (sodium_init() < 0) {
+		return false;
+	}
+	initialized = true;
+	return true;
+}
 
 static void _to_hex(const unsigned char* in, int n, char* out) {
 	static const char* hexd = "0123456789abcdef";
@@ -102,110 +103,52 @@ bool crypto_is_enabled(void) {
 }
 
 bool crypto_generate_keypair(void) {
-	EVP_PKEY_CTX* pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_X25519, NULL);
-	if (pctx == NULL) {
-		ERR_print_errors_fp(stderr);
+	if (!_ensure_sodium()) {
 		return false;
 	}
 
-	bool ok = false;
-	EVP_PKEY* pkey = NULL;
-
-	if (EVP_PKEY_keygen_init(pctx) != 1) {
-		ERR_print_errors_fp(stderr);
-		goto done;
-	}
-	if (EVP_PKEY_keygen(pctx, &pkey) != 1) {
-		ERR_print_errors_fp(stderr);
-		goto done;
-	}
-
-	if (g_KeyPair != NULL) {
-		EVP_PKEY_free(g_KeyPair);
-	}
-	g_KeyPair = pkey;
-	ok = true;
-
-done:
-	EVP_PKEY_CTX_free(pctx);
-	return ok;
+	/* crypto_box keys are X25519 key pairs. */
+	crypto_box_keypair(g_PublicKey, g_SecretKey);
+	return true;
 }
 
 int crypto_export_public_key(unsigned char* out, int out_cap) {
-	if (g_KeyPair == NULL || out_cap < CRYPTO_PUBLIC_KEY_SIZE) {
+	if (out_cap < (int)sizeof(g_PublicKey)) {
 		return -1;
 	}
 
-	size_t len = (size_t)out_cap;
-	if (EVP_PKEY_get_raw_public_key(g_KeyPair, out, &len) != 1) {
-		ERR_print_errors_fp(stderr);
-		return -1;
-	}
-
-	return (int)len;
+	memcpy(out, g_PublicKey, sizeof(g_PublicKey));
+	return (int)sizeof(g_PublicKey);
 }
 
 /*
- * HKDF-SHA256(ikm=secret, salt=g_Salt, info=g_InfoLabel || passphrase) -> g_Key.
+ * BLAKE2b(label || shared_secret || passphrase) -> g_Key. Folding the label and
+ * passphrase into the hash mirrors HKDF's salt/info binding: the passphrase
+ * authenticates the exchange, and the label domain-separates this application.
  */
 static bool _derive_key_from_secret(
 	const unsigned char* secret,
 	size_t secret_len) {
 
-	/* info = label (without its NUL) followed by the passphrase. */
-	unsigned char info[sizeof(g_InfoLabel) - 1 + DEFAULT_BUFFER_SIZE];
-	size_t label_len = sizeof(g_InfoLabel) - 1;
-	size_t pass_len = strlen(g_Passphrase);
-
-	memcpy(info, g_InfoLabel, label_len);
-	memcpy(info + label_len, g_Passphrase, pass_len);
-	size_t info_len = label_len + pass_len;
-
-	EVP_KDF* kdf = EVP_KDF_fetch(NULL, "HKDF", NULL);
-	if (kdf == NULL) {
-		ERR_print_errors_fp(stderr);
-		return false;
-	}
-
-	EVP_KDF_CTX* kctx = EVP_KDF_CTX_new(kdf);
-	EVP_KDF_free(kdf);
-	if (kctx == NULL) {
-		ERR_print_errors_fp(stderr);
-		return false;
-	}
-
-	OSSL_PARAM params[5];
-	params[0] = OSSL_PARAM_construct_utf8_string(
-		OSSL_KDF_PARAM_DIGEST, "SHA256", 0);
-	params[1] = OSSL_PARAM_construct_octet_string(
-		OSSL_KDF_PARAM_KEY, (void*)secret, secret_len);
-	params[2] = OSSL_PARAM_construct_octet_string(
-		OSSL_KDF_PARAM_SALT, (void*)g_Salt, sizeof(g_Salt) - 1);
-	params[3] = OSSL_PARAM_construct_octet_string(
-		OSSL_KDF_PARAM_INFO, info, info_len);
-	params[4] = OSSL_PARAM_construct_end();
-
-	int res = EVP_KDF_derive(kctx, g_Key, CRYPTO_KEY_SIZE, params);
-	EVP_KDF_CTX_free(kctx);
-
-	if (res != 1) {
-		ERR_print_errors_fp(stderr);
-		return false;
-	}
-
+	crypto_generichash_state st;
+	crypto_generichash_init(&st, NULL, 0, CRYPTO_KEY_SIZE);
+	crypto_generichash_update(&st, (const unsigned char*)g_InfoLabel, sizeof(g_InfoLabel) - 1);
+	crypto_generichash_update(&st, secret, secret_len);
+	crypto_generichash_update(&st, (const unsigned char*)g_Passphrase, strlen(g_Passphrase));
+	crypto_generichash_final(&st, g_Key, CRYPTO_KEY_SIZE);
 	return true;
 }
 
 /* Log the session key fingerprint and run the seal/open self-test. */
 static void _log_session_established(void) {
-	unsigned char digest[SHA256_DIGEST_LENGTH];
-	SHA256(g_Key, CRYPTO_KEY_SIZE, digest);
+	unsigned char digest[crypto_generichash_BYTES];
+	crypto_generichash(digest, sizeof(digest), g_Key, CRYPTO_KEY_SIZE, NULL, 0);
 	char key_id[4 * 2 + 1];
 	_to_hex(digest, 4, key_id);
 	_e2e_logf(
-		"[E2E] session key established  cipher=AES-256-GCM  kex=X25519-ECDH  kdf=HKDF-SHA256  key_id=%s\n",
+		"[E2E] session key established  cipher=XChaCha20-Poly1305  kex=X25519-ECDH  kdf=BLAKE2b  key_id=%s\n",
 		key_id);
-	_e2e_logf("[E2E] (key_id = first 4 bytes of SHA-256 of the session key; both peers must match)\n");
+	_e2e_logf("[E2E] (key_id = first 4 bytes of BLAKE2b of the session key; both peers must match)\n");
 
 	/* --- self test: prove seal/open actually work with the derived key --- */
 	const char* msg = "URemoteControl E2E self-test payload";
@@ -228,10 +171,10 @@ static void _log_session_established(void) {
 		bool roundtrip = (olen == mlen) && (memcmp(opened, msg, mlen) == 0);
 		_e2e_logf("[E2E] SELF-TEST decrypt round-trip: %s\n", roundtrip ? "PASS" : "FAIL");
 
-		/* Flip one ciphertext byte: GCM authentication must reject it. */
+		/* Flip one ciphertext byte: Poly1305 authentication must reject it. */
 		sealed[CRYPTO_NONCE_SIZE] ^= 0x01;
 		int tlen = crypto_open(sealed, slen, opened, (int)sizeof(opened));
-		_e2e_logf("[E2E] SELF-TEST tamper rejected by GCM auth: %s\n", (tlen < 0) ? "PASS" : "FAIL");
+		_e2e_logf("[E2E] SELF-TEST tamper rejected by AEAD auth: %s\n", (tlen < 0) ? "PASS" : "FAIL");
 	}
 
 	/* Start per-frame logging fresh after the self-test. */
@@ -242,57 +185,27 @@ static void _log_session_established(void) {
 }
 
 bool crypto_derive_session_key(const unsigned char* peer_pub, int peer_pub_len) {
-	if (g_KeyPair == NULL || peer_pub == NULL || peer_pub_len <= 0) {
+	if (peer_pub == NULL || peer_pub_len != crypto_box_PUBLICKEYBYTES) {
 		return false;
 	}
 
-	EVP_PKEY* peer = EVP_PKEY_new_raw_public_key(
-		EVP_PKEY_X25519, NULL, peer_pub, (size_t)peer_pub_len);
-	if (peer == NULL) {
-		ERR_print_errors_fp(stderr);
+	unsigned char secret[crypto_scalarmult_BYTES];
+
+	/* X25519 ECDH: shared = scalarmult(our private, peer public). */
+	if (crypto_scalarmult(secret, g_SecretKey, peer_pub) != 0) {
 		return false;
 	}
 
-	EVP_PKEY_CTX* dctx = EVP_PKEY_CTX_new(g_KeyPair, NULL);
-	if (dctx == NULL) {
-		ERR_print_errors_fp(stderr);
-		EVP_PKEY_free(peer);
-		return false;
-	}
-
-	bool ok = false;
-	unsigned char secret[CRYPTO_PUBLIC_KEY_SIZE];
-	size_t secret_len = sizeof(secret);
-
-	if (EVP_PKEY_derive_init(dctx) != 1) {
-		ERR_print_errors_fp(stderr);
-		goto done;
-	}
-	if (EVP_PKEY_derive_set_peer(dctx, peer) != 1) {
-		ERR_print_errors_fp(stderr);
-		goto done;
-	}
-	if (EVP_PKEY_derive(dctx, secret, &secret_len) != 1) {
-		ERR_print_errors_fp(stderr);
-		goto done;
-	}
-
-	if (!_derive_key_from_secret(secret, secret_len)) {
-		goto done;
-	}
+	_derive_key_from_secret(secret, sizeof(secret));
+	sodium_memzero(secret, sizeof(secret));
 
 	g_Enabled = true;
-	ok = true;
 
 	if (g_LogWanted) {
 		_log_session_established();
 	}
 
-done:
-	OPENSSL_cleanse(secret, sizeof(secret));
-	EVP_PKEY_CTX_free(dctx);
-	EVP_PKEY_free(peer);
-	return ok;
+	return true;
 }
 
 int crypto_seal(
@@ -311,51 +224,25 @@ int crypto_seal(
 
 	unsigned char* nonce = out;
 	unsigned char* ciphertext = out + CRYPTO_NONCE_SIZE;
-	unsigned char* tag = out + CRYPTO_NONCE_SIZE + pt_len;
 
-	if (RAND_bytes(nonce, CRYPTO_NONCE_SIZE) != 1) {
+	randombytes_buf(nonce, CRYPTO_NONCE_SIZE);
+
+	unsigned long long ct_len = 0;
+	if (crypto_aead_xchacha20poly1305_ietf_encrypt(
+			ciphertext, &ct_len,
+			pt, (unsigned long long)pt_len,
+			NULL, 0,          /* no additional authenticated data */
+			NULL,             /* no secret nonce */
+			nonce, g_Key) != 0) {
 		return -1;
 	}
 
-	EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-	if (ctx == NULL) {
-		return -1;
-	}
-
-	int result = -1;
-	int len = 0;
-	int ciphertext_len = 0;
-
-	if (EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) != 1) {
-		goto done;
-	}
-	if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, CRYPTO_NONCE_SIZE, NULL) != 1) {
-		goto done;
-	}
-	if (EVP_EncryptInit_ex(ctx, NULL, NULL, g_Key, nonce) != 1) {
-		goto done;
-	}
-
-	if (EVP_EncryptUpdate(ctx, ciphertext, &len, pt, pt_len) != 1) {
-		goto done;
-	}
-	ciphertext_len = len;
-
-	if (EVP_EncryptFinal_ex(ctx, ciphertext + len, &len) != 1) {
-		goto done;
-	}
-	ciphertext_len += len;
-
-	if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, CRYPTO_TAG_SIZE, tag) != 1) {
-		goto done;
-	}
-
-	result = CRYPTO_NONCE_SIZE + ciphertext_len + CRYPTO_TAG_SIZE;
+	int result = CRYPTO_NONCE_SIZE + (int)ct_len;
 
 	if (g_LogEnabled) {
 		g_SealCount++;
 		if (g_SealCount == 1 || (g_SealCount % 100) == 0) {
-			int show = ciphertext_len < 16 ? ciphertext_len : 16;
+			int show = (int)ct_len < 16 ? (int)ct_len : 16;
 			char nonce_hex[CRYPTO_NONCE_SIZE * 2 + 1];
 			char ct_hex[16 * 2 + 1];
 			_to_hex(nonce, CRYPTO_NONCE_SIZE, nonce_hex);
@@ -366,8 +253,6 @@ int crypto_seal(
 		}
 	}
 
-done:
-	EVP_CIPHER_CTX_free(ctx);
 	return result;
 }
 
@@ -385,62 +270,36 @@ int crypto_open(
 		return -1;
 	}
 
-	int pt_len = in_len - CRYPTO_OVERHEAD;
-	if (out_cap < pt_len) {
+	int pt_cap = in_len - CRYPTO_NONCE_SIZE;
+	if (out_cap < in_len - CRYPTO_OVERHEAD) {
 		return -1;
 	}
 
 	const unsigned char* nonce = in;
 	const unsigned char* ciphertext = in + CRYPTO_NONCE_SIZE;
-	unsigned char* tag = (unsigned char*)(in + CRYPTO_NONCE_SIZE + pt_len);
 
-	EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-	if (ctx == NULL) {
+	unsigned long long pt_len = 0;
+	if (crypto_aead_xchacha20poly1305_ietf_decrypt(
+			out, &pt_len,
+			NULL,             /* no secret nonce */
+			ciphertext, (unsigned long long)pt_cap,
+			NULL, 0,          /* no additional authenticated data */
+			nonce, g_Key) != 0) {
+		/* Authentication tag did not verify (tampered or wrong key). */
 		return -1;
 	}
 
-	int result = -1;
-	int len = 0;
-	int plaintext_len = 0;
-
-	if (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) != 1) {
-		goto done;
-	}
-	if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, CRYPTO_NONCE_SIZE, NULL) != 1) {
-		goto done;
-	}
-	if (EVP_DecryptInit_ex(ctx, NULL, NULL, g_Key, nonce) != 1) {
-		goto done;
-	}
-
-	if (EVP_DecryptUpdate(ctx, out, &len, ciphertext, pt_len) != 1) {
-		goto done;
-	}
-	plaintext_len = len;
-
-	if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, CRYPTO_TAG_SIZE, tag) != 1) {
-		goto done;
-	}
-
-	/* Returns <= 0 if the authentication tag does not verify. */
-	if (EVP_DecryptFinal_ex(ctx, out + len, &len) <= 0) {
-		goto done;
-	}
-	plaintext_len += len;
-
-	result = plaintext_len;
+	int result = (int)pt_len;
 
 	if (g_LogEnabled) {
 		g_OpenCount++;
 		if (g_OpenCount == 1 || (g_OpenCount % 100) == 0) {
 			_e2e_logf(
-				"[E2E] open #%lu: ciphertext=%d B -> plaintext=%d B, GCM auth OK\n",
+				"[E2E] open #%lu: ciphertext=%d B -> plaintext=%d B, AEAD auth OK\n",
 				g_OpenCount, in_len, result);
 		}
 	}
 
-done:
-	EVP_CIPHER_CTX_free(ctx);
 	return result;
 }
 
@@ -482,7 +341,7 @@ void crypto_log_enable(void) {
 	}
 
 	_e2e_logf(
-		"[E2E] status: ENABLED  key-exchange=X25519 ECDH  kdf=HKDF-SHA256  cipher=AES-256-GCM\n");
+		"[E2E] status: ENABLED  key-exchange=X25519 ECDH  kdf=BLAKE2b  cipher=XChaCha20-Poly1305\n");
 	_e2e_logf("[E2E] waiting for Diffie-Hellman handshake to establish the session key...\n");
 
 	/* The fingerprint + self-test are logged when the session key is derived. */

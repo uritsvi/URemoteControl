@@ -47,15 +47,16 @@ Both input flags default to ```0``` when missing.
 
 <h2>End-to-End Encryption</h2>
 The clients encrypt the screen and input payloads end-to-end with
-**AES-256-GCM**, so the relay server only ever forwards ciphertext and can never
-read the data. Set the **same** secret on both clients in ```config.ini```
-(```[config]``` section):
+**XChaCha20-Poly1305**, so the relay server only ever forwards ciphertext and
+can never read the data. Set the **same** secret on both clients in
+```config.ini``` (```[config]``` section):
 - ```e2e_key=your-strong-shared-secret``` — enables E2E when non-empty (leave empty to disable).
 
 The session key is established with an ephemeral **X25519** Diffie-Hellman
-exchange and derived with **HKDF-SHA256** (the ```e2e_key``` authenticates the
-exchange); a fresh random nonce is used per frame. The Go server needs no
-configuration for this — it stays a blind relay.
+exchange and derived with **BLAKE2b** (the ```e2e_key``` authenticates the
+exchange); a fresh random nonce is used per frame. All cryptography is provided
+by **libsodium**. The Go server needs no configuration for this — it stays a
+blind relay.
 See [CHANGES_E2E_DEBUG.md](CHANGES_E2E_DEBUG.md) for full details.
 
 <h2>Debug mode and running locally</h2>

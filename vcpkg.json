@@ -3,6 +3,6 @@
   "version": "1.0",
   "dependencies": [
     "zlib",
-    "openssl"
+    "libsodium"
   ]
 }
