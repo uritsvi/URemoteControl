@@ -1,0 +1,8 @@
+{
+  "name": "uremotecontrol",
+  "version": "1.0",
+  "dependencies": [
+    "zlib",
+    "libsodium"
+  ]
+}

@@ -2,7 +2,7 @@
 #define __RECEIVE__INPUT__
 
 #include <input.h>
-#include <threads.h>
+#include <platform_threads.h>
 
 void init_receive_io();
 

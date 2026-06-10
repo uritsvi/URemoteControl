@@ -1,4 +1,4 @@
-#include <threads.h>
+#include <platform_threads.h>
 #include <network.h>
 #include <program_config.h>
 #include <Common.h>
@@ -19,7 +19,7 @@ void _receive_screen_buffer_proc() {
 		int size;
 
 		bool res =
-			receive_data(
+			receive_encrypted_data(
 				g_Socket,
 				g_CurrentBuffer,
 				&size);
@@ -71,6 +71,7 @@ void init_receive_screen_buffer() {
 		return;
 	}
 }
+
 void receive_screen_buffer(
 	char* out,
 	Event work_done) {

@@ -17,6 +17,10 @@ void _error() {
 	platform_exit_with_error("Failed to read data to ini file\n");
 }
 
+static bool _parse_ini_bool(const char* value) {
+	return (value[0] == '1' || _stricmp(value, "true") == 0);
+}
+
 void read_ini(ProgramConfig* config){
 	char ini_file_path[DEFAULT_BUFFER_SIZE];
 	char buffer[DEFAULT_BUFFER_SIZE];
@@ -162,6 +166,41 @@ void read_ini(ProgramConfig* config){
 
 	config->capture_full_screen_interval =
 		StrToIntA(buffer);
+
+	res = GetPrivateProfileStringA(
+		INI_CONFIG_SECTION_NAME,
+		INI_ALLOW_REMOTE_KEYBOARD_CONTROL,
+		"0",
+		buffer,
+		DEFAULT_BUFFER_SIZE,
+		ini_file_path);
+	config->allow_remote_keyboard_control = _parse_ini_bool(buffer);
+
+	res = GetPrivateProfileStringA(
+		INI_CONFIG_SECTION_NAME,
+		INI_ALLOW_REMOTE_MOUSE_CONTROL,
+		"0",
+		buffer,
+		DEFAULT_BUFFER_SIZE,
+		ini_file_path);
+	config->allow_remote_mouse_control = _parse_ini_bool(buffer);
+
+	res = GetPrivateProfileStringA(
+		INI_CONFIG_SECTION_NAME,
+		INI_E2E_KEY,
+		"",
+		config->e2e_key,
+		DEFAULT_BUFFER_SIZE,
+		ini_file_path);
+
+	res = GetPrivateProfileStringA(
+		INI_CONFIG_SECTION_NAME,
+		INI_DEBUG_MODE,
+		"0",
+		buffer,
+		DEFAULT_BUFFER_SIZE,
+		ini_file_path);
+	config->debug_mode = _parse_ini_bool(buffer);
 
 }
 

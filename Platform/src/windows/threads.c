@@ -6,7 +6,7 @@
 #include <platfrom_memory_utils.h>
 #include <Common.h>
 
-#include "threads.h"
+#include "platform_threads.h"
 
 
 typedef struct {

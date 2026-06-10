@@ -13,6 +13,8 @@ echo compression_level=6
 echo max_send_buffer=16000
 echo // max value is 256
 echo num_of_delta_parts=50
+echo ; e2e_key must be IDENTICAL on the controller and controlled machines
+echo e2e_key=URemoteControl-demo-shared-secret-change-me
 echo [ServerConnectInfo]
 echo http_server_url="http://<ip_address>:8080/"
 echo main_server_address="<ip_address>"

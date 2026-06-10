@@ -9,7 +9,7 @@
 #include <hidsdi.h>
 #include <stdio.h>
 
-#include <threads.h>
+#include <platform_threads.h>
 
 #include "input.h"
 

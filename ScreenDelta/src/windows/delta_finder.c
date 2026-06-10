@@ -13,7 +13,7 @@
 #include <platform.h>
 #include <common.h>
 #include <error.h>
-#include <threads.h>
+#include <platform_threads.h>
 #include <platfrom_memory_utils.h>
 #include <window.h>
 #include <stdio.h>

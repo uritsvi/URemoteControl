@@ -1,12 +1,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <Common.h>
 
 #include <zlib.h>
 
-#include <threads.h>
+#include <platform_threads.h>
 #include <error.h>
 #include <network.h>
 #include <program_config.h>
@@ -35,23 +36,33 @@ static int g_DeltaRecivedCound;
 static char* g_Compressed;
 static int g_CompressedBufferSize;
 
+/*
+ * Contiguous [DeltaPacketInfo][compressed] scratch buffer. The screen payload
+ * has to be a single contiguous block so it can be sealed as one unit before it
+ * is handed to the relay server (see send_encrypted_data).
+ */
+static char* g_PacketScratch;
+
 void _send_delta_packet(
-	DeltaPacket delta, 
+	DeltaPacket delta,
 	int buffer_size) {
 
-	send_uint32(
-		g_Socket, 
-		buffer_size + sizeof(DeltaPacketInfo));
+	int total = sizeof(DeltaPacketInfo) + buffer_size;
 
-	send_data(
-		g_Socket, 
-		&delta.info, 
-		sizeof(delta.info));
+	memcpy(
+		g_PacketScratch,
+		&delta.info,
+		sizeof(DeltaPacketInfo));
 
-	send_data(
-		g_Socket, 
-		g_Compressed, 
+	memcpy(
+		g_PacketScratch + sizeof(DeltaPacketInfo),
+		g_Compressed,
 		buffer_size);
+
+	send_encrypted_data(
+		g_Socket,
+		g_PacketScratch,
+		total);
 
 	return;
 }
@@ -112,13 +123,24 @@ void init_send_screen_buffer(){
 	ProgramConfig* config = 
 		get_program_config();
 
-	g_CompressedBufferSize = 
-		config->target_width * 
-		config->target_height * 
+	int raw_frame_size =
+		config->target_width *
+		config->target_height *
 		config->target_bit_count / 8;
+
+	/*
+	 * zlib output can be slightly LARGER than its input when the screen shows
+	 * incompressible content (video, noise, photos). Size the compression
+	 * destination with compressBound so compress2 never fails with Z_BUF_ERROR
+	 * on a full-screen frame.
+	 */
+	g_CompressedBufferSize = compressBound(raw_frame_size);
 
 
 	g_Compressed = safe_malloc(g_CompressedBufferSize);
+
+	g_PacketScratch = safe_malloc(
+		sizeof(DeltaPacketInfo) + g_CompressedBufferSize);
 
 	bool res =
 		connect_to_server(

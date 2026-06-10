@@ -39,4 +39,10 @@
 
 #define INI_CAPTURE_FULL_SCREEN_INTERVALT "capture_full_screen_interval"
 
+#define INI_ALLOW_REMOTE_KEYBOARD_CONTROL "allow_remote_keyboard_control"
+#define INI_ALLOW_REMOTE_MOUSE_CONTROL "allow_remote_mouse_control"
+
+#define INI_E2E_KEY "e2e_key"
+#define INI_DEBUG_MODE "debug_mode"
+
 #endif

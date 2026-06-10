@@ -8,6 +8,7 @@
 #include <app_instances.h>
 #include <error.h>
 #include <network.h>
+#include <crypto.h>
 
 #include "receive_screen_buffer.h"
 #include "app.h"
@@ -20,6 +21,10 @@
 
 void init() {
 	ProgramConfig* config = get_program_config();
+	crypto_configure(config->e2e_key);
+	if (crypto_is_configured() && !crypto_generate_keypair()) {
+		platform_exit_with_error("Failed to generate end-to-end key pair\n");
+	}
 	bool res = init_networking(config->max_send_buffer);
 	if (!res) {
 		platform_exit_with_error("Failed to init networking\n");

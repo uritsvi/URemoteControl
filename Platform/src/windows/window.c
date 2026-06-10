@@ -32,6 +32,12 @@ static int g_NextWindowIndex;
 
 static LONG g_LastWindowStyle;
 
+static bool g_StartWindowed = false;
+
+void set_window_start_windowed(bool windowed) {
+	g_StartWindowed = windowed;
+}
+
 WIN32Window* _create_win32Window(HWND hWnd, 
 								 HWND toolbarHWND,
 								 WindowStruct* window_struct) {
@@ -311,16 +317,30 @@ void show_window(PlatformWindow window) {
 
 	PlatformConfig* config = get_platform_config();
 
-	ShowWindow(win32_window->hWnd, 
+	ShowWindow(win32_window->hWnd,
 			   config->cmdShow);
 
 	win32_window->window_border_height
 		= _calculate_border_size(win32_window->hWnd);
 
-	SetWindowLongA(
-		win32_window->hWnd,
-		GWL_STYLE,
-		WS_POPUPWINDOW | WS_VISIBLE);
+	if (g_StartWindowed) {
+		/*
+		 * Debug / windowed mode: keep a normal titled window so the screen does
+		 * not take over the whole display and stays easy to move around.
+		 */
+		g_LastWindowStyle = WINDOW_STYLE_OVERLAPED_NO_RESIZE;
+
+		SetWindowLongA(
+			win32_window->hWnd,
+			GWL_STYLE,
+			WINDOW_STYLE_OVERLAPED_NO_RESIZE | WS_VISIBLE);
+	}
+	else {
+		SetWindowLongA(
+			win32_window->hWnd,
+			GWL_STYLE,
+			WS_POPUPWINDOW | WS_VISIBLE);
+	}
 
 
 
@@ -349,23 +369,30 @@ void draw_to_window(PlatformWindow window,
 
 
 	HDC window_dc = GetDC(WIN32Window->hWnd);
+	if (window_dc == NULL) {
+		return;
+	}
 
-	
 	SetDIBitsToDevice(window_dc,
-		rect.left, 
+		rect.left,
 		rect.top,
-		width - 1, 
+		width - 1,
 		height,
 		0,
 		0,
 		0,
 		height,
-		buffer, 
-		&bi, 
+		buffer,
+		&bi,
 		DIB_RGB_COLORS);
 
-
-
+	/*
+	 * GetDC hands out a DC from the per-process cache; it MUST be released or
+	 * the process leaks a GDI handle every frame and hits the default 10,000
+	 * GDI-object limit within minutes, after which GetDC returns NULL, drawing
+	 * stops and the window stops responding.
+	 */
+	ReleaseDC(WIN32Window->hWnd, window_dc);
 }
 
 #ifdef _WIN32

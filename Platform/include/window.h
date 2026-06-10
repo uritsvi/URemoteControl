@@ -26,6 +26,13 @@ bool create_window(WindowStruct* window_struct,
 				   PlatformWindow* out,
 				   bool visible);
 
+/*
+ * When set to true, show_window keeps the window in a normal, resizable-less
+ * overlapped (non full screen) style instead of switching to the borderless
+ * full screen popup style. Used by debug mode.
+ */
+void set_window_start_windowed(bool windowed);
+
 void show_window(PlatformWindow window);
 
 void draw_to_window(PlatformWindow window,

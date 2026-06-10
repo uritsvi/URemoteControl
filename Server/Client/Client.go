@@ -16,5 +16,9 @@ type Client struct {
 	DataTarget           DataTarget
 	Index                Index
 	NotifyOnDataReceived bool
-	SocketWrapper        *SocketWrapper.SocketWrapper
+	// PublicKey is the client's end-to-end X25519 public key, sent as part of
+	// the connection handshake. Empty when end-to-end encryption is disabled.
+	// The relay forwards each client its peer's key but never uses it itself.
+	PublicKey     []byte
+	SocketWrapper *SocketWrapper.SocketWrapper
 }

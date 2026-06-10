@@ -1,5 +1,5 @@
 #include <network.h>
-#include <threads.h>
+#include <platform_threads.h>
 #include <input.h>
 #include <Common.h>
 #include <program_config.h>
@@ -35,8 +35,8 @@ void _send_io() {
 
 		for (int i = 0; i < last_input_index; i++) {
 			
-			bool res = send_data_with_size(
-				g_Socket, 
+			bool res = send_encrypted_data(
+				g_Socket,
 				&input_que[i],
 				sizeof(InputStruct));
 				

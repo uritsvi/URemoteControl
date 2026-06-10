@@ -364,3 +364,6 @@ FodyWeavers.xsd
 /controlled
 /controller
 /HTTPServer.zip
+
+# vcpkg manifest install output
+vcpkg_installed/
