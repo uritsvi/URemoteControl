@@ -4,6 +4,7 @@ import (
 	"Server/Client"
 	"Server/SocketWrapper"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"sync"
@@ -152,6 +153,11 @@ func handleHandshake(
 		}
 		publicKey = socketWrapper.ReadNBytes(publicKeyLen)
 	}
+
+	// E2E proof: log the public key the relay received from each connection
+	// (clientType 0=control 1=controller-data 2=controlled-data). A length of 0
+	// means that side has E2E disabled, which will break the peer's exchange.
+	log.Printf("[E2E-RELAY] handshake: clientType=%d index=%d publicKeyLen=%d", clientType, clientIndex, publicKeyLen)
 
 	client := new(Client.Client)
 
